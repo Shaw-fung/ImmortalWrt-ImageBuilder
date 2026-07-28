@@ -33,7 +33,9 @@ else
   mkdir -p /home/build/immortalwrt/extra-packages
 
   # 通过 GitHub API 获取所有 release 资产链接
-  RELEASES_JSON=$(curl -s "https://api.github.com/repos/${RFB_REPO}/releases")
+  GH_AUTH=()
+  [ -n "$GITHUB_TOKEN" ] && GH_AUTH=(-H "Authorization: token $GITHUB_TOKEN")
+  RELEASES_JSON=$(curl -s "${GH_AUTH[@]}" "https://api.github.com/repos/${RFB_REPO}/releases")
   ASSET_URLS=$(echo "$RELEASES_JSON" | grep '"browser_download_url"' | grep '\.run' | cut -d '"' -f 4)
 
   DOWNLOAD_COUNT=0
@@ -112,7 +114,7 @@ if echo "$PACKAGES" | grep -q "luci-app-openclash"; then
     wget -q https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat -O files/etc/openclash/GeoIP.dat
     wget -q https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat -O files/etc/openclash/GeoSite.dat
     # Download latest openclash Client
-    URL=$(curl -s https://api.github.com/repos/vernesong/OpenClash/releases/latest \
+    URL=$(curl -s "${GH_AUTH[@]}" https://api.github.com/repos/vernesong/OpenClash/releases/latest \
       | grep "browser_download_url.*ipk" \
       | head -n1 \
       | cut -d '"' -f 4)

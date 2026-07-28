@@ -19,7 +19,9 @@ else
   mkdir -p /home/build/immortalwrt/extra-packages
 
   # 通过 GitHub API 获取所有 release 资产链接
-  RELEASES_JSON=$(curl -s "https://api.github.com/repos/${RFB_REPO}/releases")
+  GH_AUTH=()
+  [ -n "$GITHUB_TOKEN" ] && GH_AUTH=(-H "Authorization: token $GITHUB_TOKEN")
+  RELEASES_JSON=$(curl -s "${GH_AUTH[@]}" "https://api.github.com/repos/${RFB_REPO}/releases")
   ASSET_URLS=$(echo "$RELEASES_JSON" | grep '"browser_download_url"' | grep '\.run' | cut -d '"' -f 4)
 
   DOWNLOAD_COUNT=0
@@ -74,10 +76,11 @@ case "$PROFILE" in
     ;;
 esac
 
-# 插入架构优先级
+# 插入架构优先级 (aarch64_cortex-a53 作为回退架构,用于安装 .run 包中的第三方插件)
 sed -i "1i\
 arch aarch64_generic 10\n\
-arch $CPU_ARCH 15" repositories.conf
+arch $CPU_ARCH 15\n\
+arch aarch64_cortex-a53 5" repositories.conf
 
 # 修改树莓派 repositories.conf 仓库路径，使通用包使用 aarch64_generic，并动态填 LUCI_VERSION
 sed -i -E "s|(src/gz immortalwrt_base .*aarch64_cortex-a[0-9]+)/base|src/gz immortalwrt_base https://downloads.immortalwrt.org/releases/$LUCI_VERSION/packages/aarch64_generic/base|" repositories.conf
@@ -88,6 +91,22 @@ sed -i -E "s|(src/gz immortalwrt_telephony .*aarch64_cortex-a[0-9]+)/telephony|s
 echo "✅ repositories.conf updated for $PROFILE with generic fallback and LUCI_VERSION=$LUCI_VERSION"
 echo "Current repositories.conf content:"
 cat repositories.conf
+
+# passwall2 依赖的 shadowsocks-libev-ss-local 和 ss-redir 不在 .run 包中
+# 从 dl.openwrt.ai 的 kiddin9 仓库补充下载
+SS_ARCH="aarch64_cortex-a53"
+SS_BASE_URL="https://dl.openwrt.ai/packages-24.10/${SS_ARCH}/kiddin9/"
+for ss_pkg in shadowsocks-libev-ss-local shadowsocks-libev-ss-redir shadowsocksr-libev-ssr-local shadowsocksr-libev-ssr-redir; do
+    SS_PAGE=$(curl -s "$SS_BASE_URL")
+    SS_FILE=$(echo "$SS_PAGE" | grep -oP "href=\"\K[^\"]*${ss_pkg}[^\"]*\.ipk" | head -n1)
+    if [ -n "$SS_FILE" ]; then
+        echo "📥 补充下载依赖: $ss_pkg -> $SS_FILE"
+        wget -q "${SS_BASE_URL}${SS_FILE}" -P /home/build/immortalwrt/packages/
+    else
+        echo "⚠️ 未找到 $ss_pkg (可从 passwall2 的 CUSTOM_PACKAGES 中移除以跳过)"
+    fi
+done
+
 # 输出调试信息
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Starting build process..."
 
@@ -129,7 +148,7 @@ if echo "$PACKAGES" | grep -q "luci-app-openclash"; then
     wget -q https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat -O files/etc/openclash/GeoIP.dat
     wget -q https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat -O files/etc/openclash/GeoSite.dat
     # Download latest openclash Client
-    URL=$(curl -s https://api.github.com/repos/vernesong/OpenClash/releases/latest \
+    URL=$(curl -s "${GH_AUTH[@]}" https://api.github.com/repos/vernesong/OpenClash/releases/latest \
       | grep "browser_download_url.*ipk" \
       | head -n1 \
       | cut -d '"' -f 4)
