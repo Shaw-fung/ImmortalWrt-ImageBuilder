@@ -34,6 +34,11 @@ ASSET_URLS=$(echo "$RELEASES_JSON" | grep '"browser_download_url"' | grep '\.run
 DOWNLOAD_COUNT=0
 for url in $ASSET_URLS; do
     filename=$(basename "$url")
+    # 24.10 使用 opkg/ipk 包: 跳过 _apk_ 标识的包 (25.12 专用)
+    if echo "$filename" | grep -qi '_apk_'; then
+        echo "⏭️ 跳过 apk 包 (25.12 专用): $filename"
+        continue
+    fi
     # 检查文件名是否匹配当前架构或为 _all 架构（通用）
     for keyword in $ARCH_KEYWORDS; do
         if echo "$filename" | grep -qi "$keyword"; then
