@@ -3,7 +3,7 @@ source shell/custom-packages.sh
 source shell/switch_repository.sh
 # 该文件实际为imagebuilder容器内的build.sh
 
-# 检测 ipq40xx 平台设备（ARM 32位）
+# 检测 ipq40xx 平台设备（ARM 32位 与 aarch64 不兼容）
 is_ipq40xx=false
 case "$PROFILE" in
     glinet_gl-b2200|p2w_r619ac-128m|p2w_r619ac-64m)
@@ -11,66 +11,32 @@ case "$PROFILE" in
         ;;
 esac
 
-# 根据架构确定 run 包匹配关键词和 arch 优先级
 if [ "$is_ipq40xx" = "true" ]; then
-    ARCH_KEYWORDS=("arm_cortex-a7" "aarch32" "_all")
-    ARCH_LINE="arch arm_cortex-a7_neon-vfpv4 20"
-    echo "📦 设备:$PROFILE 架构: ARM 32位 (ipq40xx)"
+    # ipq40xx 是 ARM 32位平台 跳过 aarch64 预编译第三方run包 避免兼容性问题
+    # 但保留 CUSTOM_PACKAGES 中的插件名称 来自 ImmortalWrt 官方仓库的插件(如 luci-i18n-*-zh-cn)仍可正常安装
+    echo "⚠️ 检测到 ipq40xx 设备:$PROFILE 跳过 aarch64 预编译第三方run包"
+    echo "ℹ️ CUSTOM_PACKAGES 中的官方仓库插件仍可正常安装"
+    # ipq40xx 不需要注入 aarch64 架构优先级 ImageBuilder 自带正确的 arch 配置
 else
-    ARCH_KEYWORDS=("aarch64" "arm64" "_all")
-    ARCH_LINE="arch aarch64_generic 10\narch aarch64_cortex-a53 15"
-    echo "📦 设备:$PROFILE 架构: ARM 64位"
-fi
+    #echo "✅ 你选择了第三方软件包：$CUSTOM_PACKAGES"
+    # 下载 run 文件仓库
+    echo "🔄 正在同步第三方软件仓库 Cloning run file repo..."
+    git clone --depth=1 https://github.com/wukongdaily/store.git /tmp/store-run-repo
 
-# 从本仓库 Release 下载对应架构的第三方插件 run 包
-echo "🔄 正在从本仓库 Release 下载第三方插件 run 包..."
-mkdir -p /home/build/immortalwrt/extra-packages
+    # 拷贝 run/arm64 下所有 run 文件和ipk文件 到 extra-packages 目录
+    mkdir -p /home/build/immortalwrt/extra-packages
+    cp -r /tmp/store-run-repo/run/arm64/* /home/build/immortalwrt/extra-packages/
 
-GITHUB_REPO="${GITHUB_REPOSITORY:-Shaw-fung/ImmortalWrt-ImageBuilder}"
-RELEASES_API="https://api.github.com/repos/${GITHUB_REPO}/releases"
-TEMP_ASSETS="/tmp/assets_list.txt"
-
-# 遍历所有 release 找匹配架构的 run 文件
-curl -s "${RELEASES_API}?per_page=30" 2>/dev/null \
-    | jq -r '.[].assets[] | "\(.name)|\(.browser_download_url)"' 2>/dev/null > "$TEMP_ASSETS"
-
-DOWNLOAD_COUNT=0
-if [ -s "$TEMP_ASSETS" ]; then
-    while IFS='|' read -r name url; do
-        [ -z "$name" ] && continue
-        # 只处理 .run 文件
-        [[ "$name" != *.run ]] && continue
-
-        # 检查文件名是否匹配当前架构
-        matched=false
-        for kw in "${ARCH_KEYWORDS[@]}"; do
-            if [[ "$name" == *"$kw"* ]]; then
-                matched=true
-                break
-            fi
-        done
-
-        if [ "$matched" = true ]; then
-            echo "⬇️ 下载: $name"
-            if curl -fsL -o "/home/build/immortalwrt/extra-packages/$name" "$url" 2>/dev/null; then
-                DOWNLOAD_COUNT=$((DOWNLOAD_COUNT + 1))
-            fi
-        fi
-    done < "$TEMP_ASSETS"
-fi
-rm -f "$TEMP_ASSETS"
-
-echo "✅ 已下载 $DOWNLOAD_COUNT 个 run 包"
-ls -lh /home/build/immortalwrt/extra-packages/*.run 2>/dev/null || echo "⚠️ 没有下载到 run 包（可能是首次运行，release 还未生成）"
-
-# 解压 run 包并拷贝 ipk 到 packages 目录
-if [ "$DOWNLOAD_COUNT" -gt 0 ]; then
+    echo "✅ Run files copied to extra-packages:"
+    ls -lh /home/build/immortalwrt/extra-packages/*.run
+    # 解压并拷贝ipk到packages目录
     sh shell/prepare-packages.sh
     ls -lah /home/build/immortalwrt/packages/
+    # 添加架构优先级信息
+    sed -i '1i\
+arch aarch64_generic 10\n\
+arch aarch64_cortex-a53 15' repositories.conf
 fi
-
-# 添加架构优先级信息
-sed -i "1i\\$ARCH_LINE" repositories.conf
 
 
 
