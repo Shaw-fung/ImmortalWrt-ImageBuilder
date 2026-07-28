@@ -31,6 +31,9 @@ on:
           - glinet_gl-axt1800
           - glinet_gl-ax1800
           - glinet_gl-b2200
+          # 竞斗云 R619AC (ipq40xx平台)
+          - p2w_r619ac-128m
+          - p2w_r619ac-64m
           - glinet_gl-x3000
           - glinet_gl-xe3000
           # 就是Fudy MT3000
@@ -595,8 +598,8 @@ jobs:
 
           # 判断机型
           case "$profile" in
-              glinet_gl-b2200)
-                  # 虽然它是高通ipq40xx平台 但由于都是gl机型 故放在一起 找起来方便
+              glinet_gl-b2200|p2w_r619ac-128m|p2w_r619ac-64m)
+                  # 高通ipq40xx平台 glinet_gl-b2200和竞斗云R619AC
                   tag=ipq40xx-generic-openwrt-24.10.6
                   echo "platform=ipq40xx/generic" >> $GITHUB_ENV
                   ;;

@@ -3,24 +3,38 @@ source shell/custom-packages.sh
 source shell/switch_repository.sh
 # 该文件实际为imagebuilder容器内的build.sh
 
-#echo "✅ 你选择了第三方软件包：$CUSTOM_PACKAGES"
-# 下载 run 文件仓库
-echo "🔄 正在同步第三方软件仓库 Cloning run file repo..."
-git clone --depth=1 https://github.com/wukongdaily/store.git /tmp/store-run-repo
+# 检测 ipq40xx 平台设备（ARM 32位 与 aarch64 不兼容）
+is_ipq40xx=false
+case "$PROFILE" in
+    glinet_gl-b2200|p2w_r619ac-128m|p2w_r619ac-64m)
+        is_ipq40xx=true
+        ;;
+esac
 
-# 拷贝 run/arm64 下所有 run 文件和ipk文件 到 extra-packages 目录
-mkdir -p /home/build/immortalwrt/extra-packages
-cp -r /tmp/store-run-repo/run/arm64/* /home/build/immortalwrt/extra-packages/
+if [ "$is_ipq40xx" = "true" ]; then
+    # ipq40xx 是 ARM 32位平台 第三方run包均为aarch64架构 跳过避免兼容性问题
+    echo "⚠️ 检测到 ipq40xx 设备:$PROFILE 跳过 aarch64 第三方run包"
+    # 仅使用 ImmortalWrt 官方仓库内的插件
+else
+    #echo "✅ 你选择了第三方软件包：$CUSTOM_PACKAGES"
+    # 下载 run 文件仓库
+    echo "🔄 正在同步第三方软件仓库 Cloning run file repo..."
+    git clone --depth=1 https://github.com/wukongdaily/store.git /tmp/store-run-repo
 
-echo "✅ Run files copied to extra-packages:"
-ls -lh /home/build/immortalwrt/extra-packages/*.run
-# 解压并拷贝ipk到packages目录
-sh shell/prepare-packages.sh
-ls -lah /home/build/immortalwrt/packages/
-# 添加架构优先级信息
-sed -i '1i\
+    # 拷贝 run/arm64 下所有 run 文件和ipk文件 到 extra-packages 目录
+    mkdir -p /home/build/immortalwrt/extra-packages
+    cp -r /tmp/store-run-repo/run/arm64/* /home/build/immortalwrt/extra-packages/
+
+    echo "✅ Run files copied to extra-packages:"
+    ls -lh /home/build/immortalwrt/extra-packages/*.run
+    # 解压并拷贝ipk到packages目录
+    sh shell/prepare-packages.sh
+    ls -lah /home/build/immortalwrt/packages/
+    # 添加架构优先级信息
+    sed -i '1i\
 arch aarch64_generic 10\n\
 arch aarch64_cortex-a53 15' repositories.conf
+fi
 
 
 

@@ -1,5 +1,21 @@
 #!/bin/bash
 source shell/apk-custom-packages.sh
+
+# 检测 ipq40xx 平台设备（ARM 32位 与 aarch64 不兼容）
+is_ipq40xx=false
+case "$PROFILE" in
+    glinet_gl-b2200|p2w_r619ac-128m|p2w_r619ac-64m)
+        is_ipq40xx=true
+        ;;
+esac
+
+if [ "$is_ipq40xx" = "true" ]; then
+    # ipq40xx 是 ARM 32位平台 第三方apk包均为arm64架构 跳过避免兼容性问题
+    echo "⚠️ 检测到 ipq40xx 设备:$PROFILE 跳过 aarch64 第三方apk包"
+    # 清空第三方包列表 仅使用 ImmortalWrt 官方仓库内的插件
+    CUSTOM_PACKAGES=""
+fi
+
 #echo "✅ 你选择了第三方软件包：$CUSTOM_PACKAGES"
 if [ -z "$CUSTOM_PACKAGES" ]; then
   echo "⚪️ 未选择 任何第三方软件包"
