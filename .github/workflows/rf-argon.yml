@@ -1,0 +1,60 @@
+name: RunFiles - Argon Theme
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 3 * * *'
+
+jobs:
+  make-run:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install makeself
+        run: sudo apt-get update && sudo apt-get install -y makeself curl
+
+      - name: Download argon ipks
+        run: |
+          chmod +x runfilesbuilder/shell/argon.sh
+          ./runfilesbuilder/shell/argon.sh
+
+      - name: Copy install.sh to each platform dir
+        run: |
+          cp runfilesbuilder/shell/install.sh x86_64/install.sh
+          cp runfilesbuilder/shell/install.sh aarch64_generic/install.sh
+          cp runfilesbuilder/shell/install.sh arm_cortex-a7_neon-vfpv4/install.sh
+          chmod +x x86_64/install.sh aarch64_generic/install.sh arm_cortex-a7_neon-vfpv4/install.sh
+
+      - name: Extract version and pack
+        id: pack
+        run: |
+          mkdir -p output
+
+          ARGON_IPK=$(ls aarch64_generic/luci-theme-argon_*.ipk | head -n 1)
+          VERSION=$(basename "$ARGON_IPK" | sed -n 's/^luci-theme-argon_\([^-]*-[^_]*\)_.*$/\1/p')
+
+          if [ -z "$VERSION" ]; then
+            echo "Cannot extract version"
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+          for PLATFORM in x86_64 aarch64_generic arm_cortex-a7_neon-vfpv4; do
+            makeself "$PLATFORM" "output/luci-theme-argon-${VERSION}_${PLATFORM}.run" \
+              "argon ${PLATFORM} Installer v${VERSION}" ./install.sh
+          done
+
+      - name: Upload run files to release
+        uses: softprops/action-gh-release@v2.1.0
+        with:
+          tag_name: "argon-${{ steps.pack.outputs.version }}"
+          name: "argon-${{ steps.pack.outputs.version }}"
+          body_path: runfilesbuilder/common.md
+          files: output/*.run
+          token: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

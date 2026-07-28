@@ -1,0 +1,53 @@
+name: RunFiles - Cleanup Old Releases
+
+on:
+  workflow_dispatch:
+    inputs:
+      keep_days:
+        description: "保留最近多少天（默认 30）"
+        required: false
+        default: "30"
+  schedule:
+    - cron: '0 6 * * 0'
+
+jobs:
+  cleanup_releases:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Install jq and gh
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+
+      - name: Delete old releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KEEP_DAYS: ${{ github.event.inputs.keep_days }}
+        run: |
+          : "${KEEP_DAYS:=30}"
+          THRESHOLD="$(date -u -d "${KEEP_DAYS} days ago" '+%Y-%m-%dT%H:%M:%SZ')"
+          echo "Threshold (UTC): $THRESHOLD"
+
+          RELEASE_IDS=$(gh api -X GET "repos/${GITHUB_REPOSITORY}/releases" \
+                        --paginate -F per_page=100 \
+                        --jq '.[] | select(.created_at < "'"$THRESHOLD"'") | .id')
+
+          if [ -z "$RELEASE_IDS" ]; then
+            echo "No releases to delete"
+            exit 0
+          fi
+
+          echo "Releases to delete: $(wc -w <<< "$RELEASE_IDS")"
+          for ID in $RELEASE_IDS; do
+            NAME=$(gh api -X GET "repos/${GITHUB_REPOSITORY}/releases/${ID}" --jq '.name')
+            echo "Deleting: $NAME (ID: $ID)"
+            gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/${ID}" || {
+              echo "Warning: Delete failed for $ID"
+            }
+            sleep 0.5
+          done
+
+          echo "Release cleanup done"

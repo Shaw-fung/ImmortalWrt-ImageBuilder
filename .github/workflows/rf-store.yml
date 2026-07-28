@@ -1,0 +1,56 @@
+name: RunFiles - iStore
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 4 * * *'
+
+jobs:
+  make-run:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install makeself
+        run: sudo apt-get update && sudo apt-get install -y makeself curl
+
+      - name: Download luci-app-store ipks
+        run: |
+          chmod +x runfilesbuilder/shell/store.sh
+          ./runfilesbuilder/shell/store.sh
+
+      - name: Copy install.sh to store folder
+        run: |
+          cp runfilesbuilder/shell/install.sh store/install.sh
+          chmod +x store/install.sh
+
+      - name: Extract version and pack
+        id: pack
+        run: |
+          mkdir -p output
+
+          STORE_IPK=$(ls store/luci-app-store_*.ipk | head -n 1)
+          VERSION=$(basename "$STORE_IPK" | sed -n 's/^luci-app-store_\([^-]*-[^_]*\)_.*$/\1/p')
+
+          if [ -z "$VERSION" ]; then
+            echo "Cannot extract version"
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+          makeself store "output/luci-app-store-${VERSION}_all.run" \
+            "iStore Installer v${VERSION}" ./install.sh
+
+      - name: Upload run files to release
+        uses: softprops/action-gh-release@v2.1.0
+        with:
+          tag_name: "iStore-${{ steps.pack.outputs.version }}"
+          name: "iStore-${{ steps.pack.outputs.version }}"
+          body_path: runfilesbuilder/info/store.md
+          files: output/*.run
+          token: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

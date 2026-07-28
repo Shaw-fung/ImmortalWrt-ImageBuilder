@@ -1,0 +1,127 @@
+name: RunFiles - AdGuardHome
+
+on:
+  workflow_dispatch:
+    inputs:
+      package_version:
+        description: 'Package version'
+        required: true
+        default: 'packages-24.10'
+  schedule:
+    - cron: '0 4 * * *'
+
+jobs:
+  make-run:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install makeself
+        run: sudo apt-get update && sudo apt-get install -y makeself curl jq
+
+      - name: Set package version
+        id: set-version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "PACKAGE_VERSION=${{ inputs.package_version }}" >> $GITHUB_ENV
+          else
+            echo "PACKAGE_VERSION=packages-24.10" >> $GITHUB_ENV
+          fi
+
+      - name: Get latest AdGuardHome release
+        id: latest-release
+        run: |
+          LATEST_TAG=$(curl -fsL https://api.github.com/repos/AdguardTeam/AdGuardHome/releases/latest | jq -r '.tag_name')
+          echo "LATEST_TAG=$LATEST_TAG" >> $GITHUB_ENV
+          echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+
+      - name: Download AdGuardHome binaries and ipks
+        run: |
+          declare -A ARCH_MAP=(
+            ["x86_64"]="amd64"
+            ["aarch64"]="arm64"
+            ["arm_cortex-a7_neon-vfpv4"]="armv7"
+          )
+
+          LATEST_TAG="${{ env.LATEST_TAG }}"
+          PACKAGE_VERSION="${{ env.PACKAGE_VERSION }}"
+          OUT_DIR=$(pwd)
+
+          for ARCH in "${!ARCH_MAP[@]}"; do
+            AGH_ARCH="${ARCH_MAP[$ARCH]}"
+            SAVE_DIR="${OUT_DIR}/${ARCH}"
+            mkdir -p "$SAVE_DIR"
+
+            echo "📦 正在处理架构: $ARCH (AdGuardHome arch: $AGH_ARCH)"
+
+            echo "⬇️ 下载 AdGuardHome $LATEST_TAG for $AGH_ARCH"
+            curl -fsL -o "/tmp/AdGuardHome_${AGH_ARCH}.tar.gz" \
+              "https://github.com/AdguardTeam/AdGuardHome/releases/download/${LATEST_TAG}/AdGuardHome_linux_${AGH_ARCH}.tar.gz"
+
+            echo "📤 解压 AdGuardHome 二进制"
+            tar -xzf "/tmp/AdGuardHome_${AGH_ARCH}.tar.gz" -C "$SAVE_DIR"
+            chmod +x "${SAVE_DIR}/AdGuardHome/AdGuardHome"
+
+            echo "⬇️ 下载 luci-app-adguardhome ipk"
+            BASE_URL="https://dl.openwrt.ai/${PACKAGE_VERSION}/${ARCH}/kiddin9"
+            PKG_INDEX="/tmp/${ARCH}_Packages"
+
+            if curl -fsL "${BASE_URL}/Packages.gz" | gunzip -c > "$PKG_INDEX"; then
+              FILE=$(awk -v kw="luci-app-adguardhome" '
+                $1=="Filename:" && $2 ~ "^"kw"_.*\\.ipk$" {
+                  print $2; exit
+                }
+              ' "$PKG_INDEX")
+
+              if [ -n "$FILE" ]; then
+                echo "⬇️ 正在下载: $FILE"
+                curl -fsL -o "${SAVE_DIR}/${FILE##*/}" "${BASE_URL}/${FILE}"
+              else
+                echo "⚠️ 未找到 luci-app-adguardhome，尝试 all.ipk"
+                curl -fsL -o "${SAVE_DIR}/luci-app-adguardhome_all.ipk" \
+                  "https://dl.openwrt.ai/${PACKAGE_VERSION}/aarch64_generic/kiddin9/luci-app-adguardhome_git-24.333.30306-36c4c54_all.ipk" 2>/dev/null || true
+              fi
+            else
+              echo "⚠️ 无法获取 Packages.gz，尝试下载固定版本 all.ipk"
+              curl -fsL -o "${SAVE_DIR}/luci-app-adguardhome_all.ipk" \
+                "https://dl.openwrt.ai/${PACKAGE_VERSION}/aarch64_generic/kiddin9/luci-app-adguardhome_git-24.333.30306-36c4c54_all.ipk" 2>/dev/null || true
+            fi
+          done
+
+          echo "✅ 下载完成"
+
+      - name: Create install.sh for each platform
+        run: |
+          for ARCH in x86_64 aarch64 arm_cortex-a7_neon-vfpv4; do
+            cat > "${ARCH}/install.sh" << 'EOF'
+          #!/bin/sh
+          opkg update
+          opkg install *.ipk
+          cp AdGuardHome/AdGuardHome /usr/bin/AdGuardHome
+          chmod +x /usr/bin/AdGuardHome
+          EOF
+            chmod +x "${ARCH}/install.sh"
+          done
+
+      - name: Pack with makeself
+        run: |
+          mkdir -p output
+          LATEST_TAG="${{ env.LATEST_TAG }}"
+
+          for PLATFORM in x86_64 aarch64 arm_cortex-a7_neon-vfpv4; do
+            makeself "$PLATFORM" "output/AdGuardHome_${LATEST_TAG}_${PLATFORM}.run" \
+              "AdGuardHome ${PLATFORM} Installer ${LATEST_TAG}" ./install.sh
+          done
+
+      - name: Upload run files to release
+        uses: softprops/action-gh-release@v2.1.0
+        with:
+          tag_name: "AdGuardHome_${{ env.LATEST_TAG }}"
+          name: "AdGuardHome_${{ env.LATEST_TAG }}"
+          body_path: runfilesbuilder/info1.md
+          files: output/*.run
+          token: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

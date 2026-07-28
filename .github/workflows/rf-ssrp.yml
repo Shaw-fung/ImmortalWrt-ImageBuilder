@@ -1,0 +1,202 @@
+name: RunFiles - ShadowsocksR Plus+
+
+on:
+  workflow_dispatch:
+    inputs:
+      package_version:
+        description: 'Package version'
+        required: true
+        default: 'packages-24.10'
+  schedule:
+    - cron: '0 3 * * *'
+
+jobs:
+  make-run:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install makeself
+        run: sudo apt-get update && sudo apt-get install -y makeself curl
+
+      - name: Set package version
+        id: set-version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "PACKAGE_VERSION=${{ inputs.package_version }}" >> $GITHUB_ENV
+          else
+            echo "PACKAGE_VERSION=packages-24.10" >> $GITHUB_ENV
+          fi
+
+      - name: Download SSRP ipks
+        run: |
+          PLATFORMS=("x86_64" "aarch64_cortex-a53" "arm_cortex-a7_neon-vfpv4")
+          PACKAGE_VERSION="${{ env.PACKAGE_VERSION }}"
+          OUT_DIR=$(pwd)
+
+          DEPEND_PREFIXES=(
+            "shadowsocks-libev-ss-server"
+            "dns2tcp"
+            "lua-neturl"
+            "chinadns-ng"
+            "dns2socks"
+            "hysteria"
+            "ipt2socks"
+            "microsocks"
+            "mosdns"
+            "naiveproxy"
+            "redsocks2"
+            "shadowsocksr-libev"
+            "shadowsocks-rust"
+            "shadow-tls"
+            "simple-obfs-client"
+            "tcping"
+            "trojan"
+            "tuic-client"
+            "v2ray-plugin"
+            "xray-core"
+          )
+
+          MAIN_PACKAGES=(
+            "luci-app-ssr-plus"
+          )
+
+          EXCLUDE_PREFIXES=(
+            "luci-app-chinadns-ng"
+            "luci-app-microsocks"
+            "luci-app-mosdns"
+            "luci-app-naiveproxy"
+            "luci-app-redsocks2"
+            "luci-app-shadowsocks"
+          )
+
+          for PLATFORM in "${PLATFORMS[@]}"; do
+            BASE_URL="https://dl.openwrt.ai/${PACKAGE_VERSION}/${PLATFORM}/kiddin9"
+            SAVE_DIR="${OUT_DIR}/${PLATFORM}"
+            DEPENDS_DIR="${SAVE_DIR}/depends"
+            mkdir -p "$DEPENDS_DIR"
+
+            echo "📦 正在处理平台: $PLATFORM"
+
+            PKG_INDEX="/tmp/${PLATFORM}_Packages"
+            if ! curl -fsL "${BASE_URL}/Packages.gz" | gunzip -c > "$PKG_INDEX"; then
+              echo "❌ 无法获取 ${BASE_URL}/Packages.gz"
+              continue
+            fi
+
+            for PREFIX in "${DEPEND_PREFIXES[@]}"; do
+              EXCLUDED=false
+              for EXCLUDE in "${EXCLUDE_PREFIXES[@]}"; do
+                if [[ "$PREFIX" == "$EXCLUDE"* ]]; then
+                  EXCLUDED=true
+                  break
+                fi
+              done
+              if $EXCLUDED; then
+                continue
+              fi
+
+              FILES=$(awk -v kw="$PREFIX" '
+                $1=="Filename:" && $2 ~ "^"kw".*\\.ipk$" {
+                  print $2
+                }
+              ' "$PKG_INDEX")
+
+              if [ -n "$FILES" ]; then
+                while IFS= read -r FILE; do
+                  if [ -z "$FILE" ]; then continue; fi
+
+                  SKIP=false
+                  for EXCLUDE in "${EXCLUDE_PREFIXES[@]}"; do
+                    BASENAME=$(basename "$FILE")
+                    if [[ "$BASENAME" == "$EXCLUDE"* ]]; then
+                      SKIP=true
+                      break
+                    fi
+                  done
+                  if $SKIP; then
+                    continue
+                  fi
+
+                  echo "⬇️ 下载依赖: $FILE"
+                  curl -fsL -o "${DEPENDS_DIR}/${FILE##*/}" "${BASE_URL}/${FILE}"
+                done <<< "$FILES"
+              else
+                echo "⚠️ 未找到匹配: $PREFIX"
+              fi
+            done
+
+            for PKG in "${MAIN_PACKAGES[@]}"; do
+              FILE=$(awk -v kw="$PKG" '
+                $1=="Filename:" && $2 ~ "^"kw"_.*\\.ipk$" {
+                  print $2; exit
+                }
+              ' "$PKG_INDEX")
+
+              if [ -n "$FILE" ]; then
+                echo "⬇️ 下载主包: $FILE"
+                curl -fsL -o "${SAVE_DIR}/${FILE##*/}" "${BASE_URL}/${FILE}"
+              else
+                echo "❌ 未找到主包: $PKG"
+              fi
+            done
+          done
+
+          echo "✅ 下载完成"
+
+      - name: Extract version and create install.sh
+        id: pack
+        run: |
+          mkdir -p output
+
+          PLATFORMS=("x86_64" "aarch64_cortex-a53" "arm_cortex-a7_neon-vfpv4")
+          VERSION=""
+
+          for PLATFORM in "${PLATFORMS[@]}"; do
+            APP_IPK=$(ls "${PLATFORM}"/luci-app-ssr-plus_*.ipk 2>/dev/null | head -n 1)
+            if [ -n "$APP_IPK" ]; then
+              VERSION=$(basename "$APP_IPK" | sed -n 's/^luci-app-ssr-plus_\(.*\)_all\.ipk$/\1/p')
+              if [ -n "$VERSION" ]; then
+                break
+              fi
+            fi
+          done
+
+          if [ -z "$VERSION" ]; then
+            echo "Cannot extract version"
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+          for PLATFORM in "${PLATFORMS[@]}"; do
+            cat > "${PLATFORM}/install.sh" << 'EOF'
+          #!/bin/sh
+          opkg update
+          opkg install depends/*.ipk --force-depends
+          opkg install *.ipk --force-depends
+          EOF
+            chmod +x "${PLATFORM}/install.sh"
+
+            makeself "${PLATFORM}" "output/ssrp-${VERSION}_${PLATFORM}.run" \
+              "ShadowsocksR Plus+ ${PLATFORM} Installer v${VERSION}" ./install.sh
+          done
+
+      - name: Clean version name
+        id: clean_version
+        run: |
+          version="${{ steps.pack.outputs.version }}"
+          version=${version%%~*}
+          echo "cleaned_version=$version" >> $GITHUB_OUTPUT
+
+      - name: Upload run files to release
+        uses: softprops/action-gh-release@v2.1.0
+        with:
+          tag_name: "ShadowsocksPlus+"
+          name: "SSRP-${{ steps.clean_version.outputs.cleaned_version }}"
+          files: output/*.run
+          token: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
