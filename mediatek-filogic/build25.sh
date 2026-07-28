@@ -50,8 +50,8 @@ if [ "$DOWNLOAD_COUNT" -gt 0 ]; then
     echo "✅ 从 $RFB_REPO 下载了 $DOWNLOAD_COUNT 个插件包"
     echo "📦 文件列表:"
     ls -lh /home/build/immortalwrt/extra-packages/*.run 2>/dev/null
-    # 解压 .run 并整理 ipk 到 packages 目录
-    sh shell/prepare-packages.sh
+    # 解压 .run 并整理 apk 到 packages 目录 (25.12使用apk包管理器)
+    sh shell/apk-prepare-packages.sh
     ls -lah /home/build/immortalwrt/packages/ 2>/dev/null
 else
     echo "⚠️ 未从 $RFB_REPO 获取到任何插件包"
