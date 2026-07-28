@@ -11,31 +11,52 @@ case "$PROFILE" in
         ;;
 esac
 
+# 配置我们的 RunFilesBuilder 仓库
+RFB_REPO="Shaw-fung/RunFilesBuilder"
+
+# 根据设备架构确定匹配关键词
 if [ "$is_ipq40xx" = "true" ]; then
-    # ipq40xx 是 ARM 32位平台 跳过 aarch64 预编译第三方run包 避免兼容性问题
-    # 但保留 CUSTOM_PACKAGES 中的插件名称 来自 ImmortalWrt 官方仓库的插件(如 luci-i18n-*-zh-cn)仍可正常安装
-    echo "⚠️ 检测到 ipq40xx 设备:$PROFILE 跳过 aarch64 预编译第三方run包"
-    echo "ℹ️ CUSTOM_PACKAGES 中的官方仓库插件仍可正常安装"
-    # ipq40xx 不需要注入 aarch64 架构优先级 ImageBuilder 自带正确的 arch 配置
+    ARCH_KEYWORDS="arm_cortex-a7_neon-vfpv4 aarch32 _all"
+    echo "📦 设备:$PROFILE 架构: ARM 32位 (ipq40xx)"
 else
-    #echo "✅ 你选择了第三方软件包：$CUSTOM_PACKAGES"
-    # 下载 run 文件仓库
-    echo "🔄 正在同步第三方软件仓库 Cloning run file repo..."
-    git clone --depth=1 https://github.com/wukongdaily/store.git /tmp/store-run-repo
+    ARCH_KEYWORDS="aarch64 arm64 _all"
+    echo "📦 设备:$PROFILE 架构: ARM 64位 (aarch64)"
+fi
 
-    # 拷贝 run/arm64 下所有 run 文件和ipk文件 到 extra-packages 目录
-    mkdir -p /home/build/immortalwrt/extra-packages
-    cp -r /tmp/store-run-repo/run/arm64/* /home/build/immortalwrt/extra-packages/
+# 从我们的 RunFilesBuilder 仓库下载第三方插件 .run 包
+echo "🔄 正在从 $RFB_REPO 下载第三方插件..."
+mkdir -p /home/build/immortalwrt/extra-packages
 
-    echo "✅ Run files copied to extra-packages:"
-    ls -lh /home/build/immortalwrt/extra-packages/*.run
-    # 解压并拷贝ipk到packages目录
+# 通过 GitHub API 获取所有 release 资产链接
+RELEASES_JSON=$(curl -s "https://api.github.com/repos/${RFB_REPO}/releases")
+ASSET_URLS=$(echo "$RELEASES_JSON" | grep '"browser_download_url"' | grep '\.run' | cut -d '"' -f 4)
+
+DOWNLOAD_COUNT=0
+for url in $ASSET_URLS; do
+    filename=$(basename "$url")
+    # 检查文件名是否匹配当前架构或为 _all 架构（通用）
+    for keyword in $ARCH_KEYWORDS; do
+        if echo "$filename" | grep -qi "$keyword"; then
+            echo "📥 下载: $filename"
+            if wget -q --timeout=30 "$url" -P /home/build/immortalwrt/extra-packages/; then
+                DOWNLOAD_COUNT=$((DOWNLOAD_COUNT + 1))
+            else
+                echo "⚠️ 下载失败: $filename"
+            fi
+            break
+        fi
+    done
+done
+
+if [ "$DOWNLOAD_COUNT" -gt 0 ]; then
+    echo "✅ 从 $RFB_REPO 下载了 $DOWNLOAD_COUNT 个插件包"
+    echo "📦 文件列表:"
+    ls -lh /home/build/immortalwrt/extra-packages/*.run 2>/dev/null
+    # 解压 .run 并整理 ipk 到 packages 目录
     sh shell/prepare-packages.sh
-    ls -lah /home/build/immortalwrt/packages/
-    # 添加架构优先级信息
-    sed -i '1i\
-arch aarch64_generic 10\n\
-arch aarch64_cortex-a53 15' repositories.conf
+    ls -lah /home/build/immortalwrt/packages/ 2>/dev/null
+else
+    echo "⚠️ 未从 $RFB_REPO 获取到任何插件包"
 fi
 
 
