@@ -3,6 +3,26 @@ source shell/custom-packages.sh
 source shell/switch_repository.sh
 # 该文件实际为imagebuilder容器内的build.sh
 
+# 检测 ipq40xx 平台设备（ARM 32位 与 aarch64 不兼容）
+is_ipq40xx=false
+case "$PROFILE" in
+    glinet_gl-b2200|p2w_r619ac-128m|p2w_r619ac-64m)
+        is_ipq40xx=true
+        ;;
+esac
+
+# 配置我们的 RunFilesBuilder 仓库
+RFB_REPO="Shaw-fung/RunFilesBuilder"
+
+# 根据设备架构确定匹配关键词
+if [ "$is_ipq40xx" = "true" ]; then
+    ARCH_KEYWORDS="arm_cortex-a7_neon-vfpv4 aarch32 _all"
+    echo "📦 设备:$PROFILE 架构: ARM 32位 (ipq40xx)"
+else
+    ARCH_KEYWORDS="aarch64 arm64 _all"
+    echo "📦 设备:$PROFILE 架构: ARM 64位 (aarch64)"
+fi
+
 if [ -n "$CUSTOM_PACKAGES" ]; then
   echo "✅ 你选择了第三方软件包：$CUSTOM_PACKAGES"
   if [ "$PROFILE" = "glinet_gl-mt3000" ]; then
@@ -10,19 +30,46 @@ if [ -n "$CUSTOM_PACKAGES" ]; then
     echo "✅ 系统将自动帮你注释掉shell/custom-packages.sh中的插件 目前支持第三方插件集成的机型是mt2500/mt6000等大闪存机型"
     CUSTOM_PACKAGES=""
   else
-    # 下载 run 文件仓库
-    echo "🔄 正在同步第三方软件仓库 Cloning run file repo..."
-    git clone --depth=1 https://github.com/wukongdaily/store.git /tmp/store-run-repo
-
-    # 拷贝 run/arm64 下所有 run 文件和ipk文件 到 extra-packages 目录
+    # 从 RunFilesBuilder 仓库下载第三方插件 .run 包
+    echo "🔄 正在从 $RFB_REPO 下载第三方插件..."
     mkdir -p /home/build/immortalwrt/extra-packages
-    cp -r /tmp/store-run-repo/run/arm64/* /home/build/immortalwrt/extra-packages/
 
-    echo "✅ Run files copied to extra-packages:"
-    ls -lh /home/build/immortalwrt/extra-packages/*.run
-    # 解压并拷贝ipk到packages目录
-    sh shell/prepare-packages.sh
-    ls -lah /home/build/immortalwrt/packages/
+    # 通过 GitHub API 获取所有 release 资产链接
+    RELEASES_JSON=$(curl -s "https://api.github.com/repos/${RFB_REPO}/releases")
+    ASSET_URLS=$(echo "$RELEASES_JSON" | grep '"browser_download_url"' | grep '\.run' | cut -d '"' -f 4)
+
+    DOWNLOAD_COUNT=0
+    for url in $ASSET_URLS; do
+        filename=$(basename "$url")
+        # 24.10 使用 opkg/ipk 包: 跳过 _apk_ 标识的包 (25.12 专用)
+        if echo "$filename" | grep -qi '_apk_'; then
+            echo "⏭️ 跳过 apk 包 (25.12 专用): $filename"
+            continue
+        fi
+        # 检查文件名是否匹配当前架构或为 _all 架构（通用）
+        for keyword in $ARCH_KEYWORDS; do
+            if echo "$filename" | grep -qi "$keyword"; then
+                echo "📥 下载: $filename"
+                if wget -q --timeout=30 "$url" -P /home/build/immortalwrt/extra-packages/; then
+                    DOWNLOAD_COUNT=$((DOWNLOAD_COUNT + 1))
+                else
+                    echo "⚠️ 下载失败: $filename"
+                fi
+                break
+            fi
+        done
+    done
+
+    if [ "$DOWNLOAD_COUNT" -gt 0 ]; then
+        echo "✅ 从 $RFB_REPO 下载了 $DOWNLOAD_COUNT 个插件包"
+        echo "📦 文件列表:"
+        ls -lh /home/build/immortalwrt/extra-packages/*.run 2>/dev/null
+        # 解压 .run 并整理 ipk 到 packages 目录
+        sh shell/prepare-packages.sh
+        ls -lah /home/build/immortalwrt/packages/ 2>/dev/null
+    else
+        echo "⚠️ 未从 $RFB_REPO 获取到任何插件包"
+    fi
     # 添加架构优先级信息
     sed -i '1i\
     arch aarch64_generic 10\n\
