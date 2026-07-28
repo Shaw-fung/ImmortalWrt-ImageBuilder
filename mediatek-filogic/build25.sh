@@ -10,29 +10,29 @@ case "$PROFILE" in
 esac
 
 if [ "$is_ipq40xx" = "true" ]; then
-    # ipq40xx 是 ARM 32位平台 第三方apk包均为arm64架构 跳过避免兼容性问题
-    echo "⚠️ 检测到 ipq40xx 设备:$PROFILE 跳过 aarch64 第三方apk包"
-    # 清空第三方包列表 仅使用 ImmortalWrt 官方仓库内的插件
-    CUSTOM_PACKAGES=""
-fi
-
-#echo "✅ 你选择了第三方软件包：$CUSTOM_PACKAGES"
-if [ -z "$CUSTOM_PACKAGES" ]; then
-  echo "⚪️ 未选择 任何第三方软件包"
+    # ipq40xx 是 ARM 32位平台 跳过 aarch64 预编译第三方apk包 避免兼容性问题
+    # 但保留 CUSTOM_PACKAGES 中的插件名称 来自 ImmortalWrt 官方仓库的插件(如 luci-i18n-*-zh-cn)仍可正常安装
+    echo "⚠️ 检测到 ipq40xx 设备:$PROFILE 跳过 aarch64 预编译第三方apk包"
+    echo "ℹ️ CUSTOM_PACKAGES 中的官方仓库插件仍可正常安装"
 else
-  # ============= 同步第三方插件库==============
-  # 同步第三方软件仓库run/apk
-  echo "🔄 正在同步第三方软件仓库 Cloning apk file repo..."
-  git clone --depth=1 https://github.com/wukongdaily/apk.git /tmp/store-apk-repo
+  #echo "✅ 你选择了第三方软件包：$CUSTOM_PACKAGES"
+  if [ -z "$CUSTOM_PACKAGES" ]; then
+    echo "⚪️ 未选择 任何第三方软件包"
+  else
+    # ============= 同步第三方插件库==============
+    # 同步第三方软件仓库run/apk
+    echo "🔄 正在同步第三方软件仓库 Cloning apk file repo..."
+    git clone --depth=1 https://github.com/wukongdaily/apk.git /tmp/store-apk-repo
 
-  # 拷贝 run/arm64 下所有 run 文件和apk文件 到 extra-packages 目录
-  mkdir -p /home/build/immortalwrt/extra-packages
-  cp -r /tmp/store-apk-repo/run/arm64-a53/* /home/build/immortalwrt/extra-packages/
+    # 拷贝 run/arm64 下所有 run 文件和apk文件 到 extra-packages 目录
+    mkdir -p /home/build/immortalwrt/extra-packages
+    cp -r /tmp/store-apk-repo/run/arm64-a53/* /home/build/immortalwrt/extra-packages/
 
-  echo "✅ Run files copied to extra-packages:"
-  # 解压并拷贝apk到packages目录
-  sh shell/apk-prepare-packages.sh
-  ls -lah /home/build/immortalwrt/packages/
+    echo "✅ Run files copied to extra-packages:"
+    # 解压并拷贝apk到packages目录
+    sh shell/apk-prepare-packages.sh
+    ls -lah /home/build/immortalwrt/packages/
+  fi
 fi
 
 
@@ -88,8 +88,12 @@ fi
 if echo "$PACKAGES" | grep -q "luci-app-openclash"; then
     echo "✅ 已选择 luci-app-openclash，添加 openclash core"
     mkdir -p files/etc/openclash/core
-    # Download clash_meta
-    META_URL="https://raw.githubusercontent.com/vernesong/OpenClash/core/master/meta/clash-linux-arm64.tar.gz"
+    # Download clash_meta (根据架构选择 arm 或 arm64 版本)
+    if [ "$is_ipq40xx" = "true" ]; then
+        META_URL="https://raw.githubusercontent.com/vernesong/OpenClash/core/master/meta/clash-linux-arm.tar.gz"
+    else
+        META_URL="https://raw.githubusercontent.com/vernesong/OpenClash/core/master/meta/clash-linux-arm64.tar.gz"
+    fi
     wget -qO- $META_URL | tar xOvz > files/etc/openclash/core/clash_meta
     chmod +x files/etc/openclash/core/clash_meta
     # Download GeoIP and GeoSite
