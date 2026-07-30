@@ -140,6 +140,28 @@ else
 fi
 
 
+# 修复 daede 依赖：上游未提供 ipq40xx 架构的 vmlinux-btf 和 kmod-xdp-sockets-diag
+# 移除 dae/daed apk 中这些缺失的依赖，使构建能通过
+if [ "$is_ipq40xx" = "true" ]; then
+    for pkg_file in /home/build/immortalwrt/packages/dae-*.apk /home/build/immortalwrt/packages/daed-*.apk; do
+        [ -e "$pkg_file" ] || continue
+        echo "🔧 移除 $pkg_file 中的缺失依赖 (vmlinux-btf, kmod-xdp-sockets-diag)..."
+        mkdir -p /tmp/fix-apk
+        cd /tmp/fix-apk
+        rm -rf *
+        tar xzf "$pkg_file"
+        sed -i '/^depend = vmlinux-btf$/d; /^depend = kmod-xdp-sockets-diag$/d' .PKGINFO
+        tar czf "$pkg_file" *
+        cd - >/dev/null
+    done
+    # 重新生成 APKINDEX
+    if command -v apk >/dev/null 2>&1; then
+        echo "📦 重新生成 APKINDEX 索引..."
+        cd /home/build/immortalwrt/packages && apk index -o APKINDEX.tar.gz *.apk 2>/dev/null && cd ..
+        echo "✅ APKINDEX 索引已重新生成"
+    fi
+fi
+
 # 构建镜像
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Building image with the following packages:"
 echo "$PACKAGES"
