@@ -66,27 +66,6 @@ else
     echo "⚠️ 未从 $RFB_REPO 获取到任何插件包"
 fi
 
-# passwall2 依赖的 shadowsocks-libev-ss-local 和 ss-redir 不在 .run 包中
-# 从 dl.openwrt.ai 的 kiddin9 仓库补充下载
-if [ "$is_ipq40xx" = "true" ]; then
-    SS_ARCH="arm_cortex-a7_neon-vfpv4"
-else
-    SS_ARCH="aarch64_cortex-a53"
-fi
-SS_BASE_URL="https://dl.openwrt.ai/packages-24.10/${SS_ARCH}/kiddin9/"
-for ss_pkg in shadowsocks-libev-ss-local shadowsocks-libev-ss-redir; do
-    SS_PAGE=$(curl -s "$SS_BASE_URL")
-    SS_FILE=$(echo "$SS_PAGE" | grep -oP "href=\"\K[^\"]*${ss_pkg}[^\"]*\.ipk" | head -n1)
-    if [ -n "$SS_FILE" ]; then
-        echo "📥 补充下载依赖: $ss_pkg -> $SS_FILE"
-        wget -q "${SS_BASE_URL}${SS_FILE}" -P /home/build/immortalwrt/packages/
-    else
-        echo "⚠️ 未找到 $ss_pkg (可从 passwall2 的 CUSTOM_PACKAGES 中移除以跳过)"
-    fi
-done
-
-
-
 # yml 传入的路由器型号 PROFILE
 echo "Building for profile: $PROFILE"
 
