@@ -28,7 +28,8 @@ mkdir -p /home/build/immortalwrt/extra-packages
 # 通过 GitHub API 获取所有 release 资产链接
 GH_AUTH=()
 [ -n "$GITHUB_TOKEN" ] && GH_AUTH=(-H "Authorization: token $GITHUB_TOKEN")
-RELEASES_JSON=$(curl -s "${GH_AUTH[@]}" "https://api.github.com/repos/${RFB_REPO}/releases")
+GH_AUTH+=(-H "User-Agent: ImmortalWrt-ImageBuilder")
+RELEASES_JSON=$(curl -s "${GH_AUTH[@]}" "https://api.github.com/repos/${RFB_REPO}/releases?per_page=100")
 ASSET_URLS=$(echo "$RELEASES_JSON" | grep '"browser_download_url"' | grep '\.run' | cut -d '"' -f 4)
 
 DOWNLOAD_COUNT=0
