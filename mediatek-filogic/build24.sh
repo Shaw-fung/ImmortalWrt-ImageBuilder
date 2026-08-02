@@ -32,7 +32,10 @@ GH_AUTH=()
 [ -n "$GITHUB_TOKEN" ] && GH_AUTH=(-H "Authorization: token $GITHUB_TOKEN")
 GH_AUTH+=(-H "User-Agent: ImmortalWrt-ImageBuilder")
 RELEASES_JSON=$(curl -s "${GH_AUTH[@]}" "https://api.github.com/repos/${RFB_REPO}/releases?per_page=100")
-ASSET_URLS=$(echo "$RELEASES_JSON" | grep '"browser_download_url"' | grep '\.run' | cut -d '"' -f 4)
+# 注意: GitHub API 返回的是单行紧凑 JSON (无换行), 不能用 `grep | cut -d '"' -f 4`
+# 否则只会取整行的第4个引号字段 (即 JSON 开头的 "url" 字段值), 拿不到真正的下载链接。
+# 使用 grep -o 提取完整的 "browser_download_url":"..." 字段值, 再用 sed 去掉键名和两侧引号。
+ASSET_URLS=$(echo "$RELEASES_JSON" | grep -o '"browser_download_url":"[^"]*"' | grep '\.run"' | sed 's/"browser_download_url":"//;s/"$//')
 
 DOWNLOAD_COUNT=0
 for url in $ASSET_URLS; do
